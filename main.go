@@ -1,10 +1,3 @@
-# Удалите старый файл
-rm main.go
-
-# Создайте новый с правильным кодом
-cat > main.go << 'EOF'
-package main
-
 import (
 	"fmt"
 	"io"
