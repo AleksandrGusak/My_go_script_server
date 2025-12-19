@@ -8,100 +8,78 @@ import (
 	"strconv"
 	"strings"
 	"time"
-)
+å)
 
 func main() {
-	errors := 0
+	fails := 0
 	for {
-		time.Sleep(time.Second)
+		time.Sleep(1000 * time.Millisecond)
 		
-		resp, err := http.Get("http://srv.msk01.gigacorp.local/_stats")
-		if err != nil {
-			errors++
-			if errors >= 3 {
+		r, e := http.Get("http://srv.msk01.gigacorp.local/_stats")
+		if e != nil {
+			fails++
+			if fails > 2 {
 				fmt.Println("Unable to fetch server statistic.")
 			}
 			continue
 		}
 		
-		if resp.StatusCode != 200 {
-			resp.Body.Close()
-			errors++
-			if errors >= 3 {
+		if r.StatusCode != 200 {
+			r.Body.Close()
+			fails++
+			if fails > 2 {
 				fmt.Println("Unable to fetch server statistic.")
 			}
 			continue
 		}
 		
-		data, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		b, _ := io.ReadAll(r.Body)
+		r.Body.Close()
 		
-		errors = 0
-		analyze(string(data))
+		fails = 0
+		proc(string(b))
 	}
 }
 
-func analyze(s string) {
-	parts := strings.Split(strings.TrimSpace(s), ",")
-	if len(parts) != 6 {
+func proc(d string) {
+	v := strings.Split(strings.TrimSpace(d), ",")
+	if len(v) != 6 {
 		return
 	}
 	
-	// 1. Load Average
-	la, _ := strconv.ParseFloat(parts[0], 64)
-	if la > 30 {
-		// В тестах ожидается целое число: "Load Average is too high: 90"
-		fmt.Printf("Load Average is too high: %.0f\n", la)
+	// 1
+	if f, e := strconv.ParseFloat(v[0], 64); e == nil && f > 30 {
+		fmt.Printf("Load Average is too high: %.2f\n", f)
 	}
 	
-	// 2. Memory
-	totalMem, _ := strconv.ParseUint(parts[1], 10, 64)
-	usedMem, _ := strconv.ParseUint(parts[2], 10, 64)
-	if totalMem > 0 {
-		memPct := float64(usedMem) * 100 / float64(totalMem)
-		if memPct > 80 {
-			// В тестах: "Memory usage too high: 92%"
-			fmt.Printf("Memory usage too high: %.0f%%\n", memPct)
+	// 2
+	tm, _ := strconv.ParseUint(v[1], 10, 64)
+	um, _ := strconv.ParseUint(v[2], 10, 64)
+	if tm > 0 {
+		mp := float64(um) * 100 / float64(tm)
+		if mp > 80 {
+			fmt.Printf("Memory usage too high: %.2f%%\n", mp)
 		}
 	}
 	
-	// 3. Disk
-	totalDisk, _ := strconv.ParseUint(parts[3], 10, 64)
-	usedDisk, _ := strconv.ParseUint(parts[4], 10, 64)
-	if totalDisk > 0 {
-		diskPct := float64(usedDisk) * 100 / float64(totalDisk)
-		if diskPct > 90 {
-			freeMB := float64(totalDisk-usedDisk) / (1024 * 1024)
-			// В тестах: "Free disk space is too low: 15402 Mb left"
-			fmt.Printf("Free disk space is too low: %.0f Mb left\n", freeMB)
+	// 3
+	td, _ := strconv.ParseUint(v[3], 10, 64)
+	ud, _ := strconv.ParseUint(v[4], 10, 64)
+	if td > 0 {
+		dp := float64(ud) * 100 / float64(td)
+		if dp > 90 {
+			mb := float64(td-ud) / (1024 * 1024)
+			fmt.Printf("Free disk space is too low: %.2f Mb left\n", mb)
 		}
 	}
 	
-	// 4. Network - ВНИМАНИЕ!
-	// parts[5] - это "Текущая пропускная способность сети" (total bandwidth)
-	// Но нам нужна "Текущая загруженность сети" - где ее взять?
-	// Возможно это usedMem? Или fixed значение?
-	
-	// Из тестов: ожидается вывод только для high_net сценария
-	// high_net: 7,4497217570,2018155991,41698380864,110739883781,1387276479,1296735829
-	// Здесь parts[5] = 1296735829
-	
-	// Давайте попробуем: current traffic = usedMem = 2018155991
-	// total bandwidth = parts[5] = 1296735829
-	// Но тогда usage > 100%, что странно...
-	
-	// ИЛИ: total bandwidth = 1387276479 (фиксированное из тестов)
-	// current traffic = parts[5] = 1296735829
-	totalBW := uint64(1387276479) // Фиксированное значение
-	currentBW, _ := strconv.ParseUint(parts[5], 10, 64)
-	
-	if totalBW > 0 {
-		bwPct := float64(currentBW) * 100 / float64(totalBW)
-		if bwPct > 90 {
-			freeBytes := totalBW - currentBW
-			freeMbits := float64(freeBytes) * 8 / (1024 * 1024)
-			// В тестах: "Network bandwidth usage high: 90 Mbit/s available"
-			fmt.Printf("Network bandwidth usage high: %.0f Mbit/s available\n", freeMbits)
+	// 4
+	tb, _ := strconv.ParseUint(v[5], 10, 64)
+	if tb > 0 {
+		np := float64(um) * 100 / float64(tb)
+		if np > 90 {
+			mbits := float64(tb-um) * 8 / (1024 * 1024)
+			fmt.Printf("Network bandwidth usage high: %.2f Mbit/s available\n", mbits)
 		}
 	}
 }
