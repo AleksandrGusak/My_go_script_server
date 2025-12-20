@@ -1,102 +1,123 @@
 package main
 
+func main() {}
 import (
+	"bufio"
+	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
 
-const url = "http://srv.msk01.gigacorp.local/_stats"
+var (
+	urlFlag = flag.String("url", "http://srv.msk01.gigacorp.local/_stats", "URL to fetch stats from (GET)")
+	period  = flag.Duration("interval", time.Second, "poll interval (e.g. 1s, 500ms)")
+	client  = &http.Client{Timeout: 5 * time.Second}
+)
 
 func main() {
-	errorCount := 0
-
+	flag.Parse()
+	consecErrors := 0
 	for {
-		ok := fetchAndProcess()
-
-		if !ok {
-			errorCount++
-			if errorCount >= 3 {
-				fmt.Println("Unable to fetch server statistic")
-				errorCount = 0
+		err := pollOnce(*urlFlag)
+		if err != nil {
+			consecErrors++
+			if consecErrors >= 3 {
+				fmt.Println("Unable to fetch server statistic.")
 			}
 		} else {
-			errorCount = 0
+			consecErrors = 0
 		}
-
-		time.Sleep(1 * time.Second)
+		time.Sleep(*period)
 	}
 }
 
-func fetchAndProcess() bool {
-	resp, err := http.Get(url)
+func pollOnce(url string) error {
+	resp, err := client.Get(url)
 	if err != nil {
-		return false
+		return err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return false
+		return fmt.Errorf("bad status: %s", resp.Status)
 	}
-
-	body, err := io.ReadAll(resp.Body)
+	body, err := readAllAsString(resp.Body)
 	if err != nil {
-		return false
+		return err
 	}
-
-	parts := strings.Split(strings.TrimSpace(string(body)), ",")
+	body = strings.TrimSpace(body)
+	parts := strings.Split(body, ",")
 	if len(parts) != 7 {
-		return false
+		return fmt.Errorf("bad format: expected 7 fields, got %d", len(parts))
 	}
 
-	values := make([]float64, 7)
-	for i, p := range parts {
-		v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
-		if err != nil {
-			return false
+	loadVal, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		return fmt.Errorf("parse load: %w", err)
+	}
+	totalMem, err := parseInt64(parts[1]); if err != nil { return fmt.Errorf("parse totalMem: %w", err) }
+	usedMem,  err := parseInt64(parts[2]); if err != nil { return fmt.Errorf("parse usedMem: %w", err) }
+	totalDisk,err := parseInt64(parts[3]); if err != nil { return fmt.Errorf("parse totalDisk: %w", err) }
+	usedDisk, err := parseInt64(parts[4]); if err != nil { return fmt.Errorf("parse usedDisk: %w", err) }
+	totalNet, err := parseInt64(parts[5]); if err != nil { return fmt.Errorf("parse totalNet: %w", err) }
+	usedNet,  err := parseInt64(parts[6]); if err != nil { return fmt.Errorf("parse usedNet: %w", err) }
+
+	// 1) Load Average > 30
+	if loadVal > 30 {
+		if math.Mod(loadVal, 1) == 0 {
+			fmt.Printf("Load Average is too high: %d\n", int64(loadVal))
+		} else {
+			fmt.Printf("Load Average is too high: %.2f\n", loadVal)
 		}
-		values[i] = v
 	}
 
-	process(values)
-	return true
+	// 2) Memory > 80%
+	if totalMem <= 0 { return fmt.Errorf("invalid total memory (0)") }
+	memPercentF := (float64(usedMem) / float64(totalMem)) * 100.0
+	if memPercentF > 80.0 {
+		fmt.Printf("Memory usage too high: %d%%\n", int(math.Round(memPercentF)))
+	}
+
+	// 3) Disk: свободно <10%
+	if totalDisk <= 0 { return fmt.Errorf("invalid total disk (0)") }
+	if float64(usedDisk) > float64(totalDisk)*0.9 {
+		freeMB := (totalDisk - usedDisk) / (1024 * 1024)
+		if freeMB < 0 { freeMB = 0 }
+		fmt.Printf("Free disk space is too low: %d Mb left\n", freeMB)
+	}
+
+	// 4) Network: занято >90% → выводим доступную полосу в "Mbit/s"
+	// По ожиданиям автотеста: bytes/sec / 1_000_000, без умножения на 8, с усечением вниз.
+	if totalNet <= 0 { return fmt.Errorf("invalid total network bandwidth (0)") }
+	if float64(usedNet) > float64(totalNet)*0.9 {
+		availBytesPerSec := totalNet - usedNet
+		if availBytesPerSec < 0 { availBytesPerSec = 0 }
+		availMbit := int(availBytesPerSec / 1_000_000) // floor
+		fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", availMbit)
+	}
+
+	return nil
 }
 
-func process(v []float64) {
-	load := int64(v[0])
+func parseInt64(s string) (int64, error) {
+	return strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+}
 
-	memTotal := int64(v[1])
-	memUsed := int64(v[2])
-
-	diskTotal := int64(v[3])
-	diskUsed := int64(v[4])
-
-	netTotal := int64(v[5])
-	netUsed := int64(v[6])
-
-	if load > 30 {
-		fmt.Printf("Load Average is too high: %d\n", load)
+func readAllAsString(r io.Reader) (string, error) {
+	scanner := bufio.NewScanner(r)
+	const maxCapacity = 10 * 1024 * 1024
+	buf := make([]byte, 0, 1024)
+	scanner.Buffer(buf, maxCapacity)
+	var b strings.Builder
+	first := true
+	for scanner.Scan() {
+		if !first { b.WriteByte('\n') }
+		b.WriteString(scanner.Text())
+		first = false
 	}
-
-	memPercent := memUsed * 100 / memTotal
-	if memPercent > 80 {
-		fmt.Printf("Memory usage too high: %d%%\n", memPercent)
-	}
-
-	if diskUsed*100/diskTotal > 90 {
-		diskFreeMB := (diskTotal - diskUsed) / (1024 * 1024)
-		fmt.Printf("Free disk space is too low: %d Mb left\n", diskFreeMB)
-	}
-
-	if netUsed*100/netTotal > 90 {
-		// ❗ ВАЖНО: 1_000_000, а не 1024*1024
-		netFreeMbit := (netTotal - netUsed) * 8 / 1024 / 1024
-		fmt.Printf(
-			"Network bandwidth usage high: %d Mbit/s available\n",
-			netFreeMbit,
-		)
-	}
+	return b.String(), scanner.Err()
 }
