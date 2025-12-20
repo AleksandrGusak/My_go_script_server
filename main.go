@@ -66,35 +66,33 @@ func fetchAndProcess() bool {
 }
 
 func process(v []float64) {
-	load := v[0]
+	load := int64(v[0])
 
-	memTotal := v[1]
-	memUsed := v[2]
+	memTotal := int64(v[1])
+	memUsed := int64(v[2])
 
-	diskTotal := v[3]
-	diskUsed := v[4]
+	diskTotal := int64(v[3])
+	diskUsed := int64(v[4])
 
-	netTotal := v[5]
-	netUsed := v[6]
+	netTotal := int64(v[5])
+	netUsed := int64(v[6])
 
 	if load > 30 {
-		fmt.Printf("Load Average is too high: %.0f\n", load)
+		fmt.Printf("Load Average is too high: %d\n", load)
 	}
 
-	memPercent := memUsed / memTotal * 100
+	memPercent := memUsed * 100 / memTotal
 	if memPercent > 80 {
-		fmt.Printf("Memory usage too high: %.0f%%\n", memPercent)
+		fmt.Printf("Memory usage too high: %d%%\n", memPercent)
 	}
 
-	diskFreeBytes := diskTotal - diskUsed
-	diskFreeMB := diskFreeBytes / (1024 * 1024)
-	if diskUsed/diskTotal*100 > 90 {
-		fmt.Printf("Free disk space is too low: %.0f Mb left\n", diskFreeMB)
+	if diskUsed*100/diskTotal > 90 {
+		diskFreeMB := (diskTotal - diskUsed) / (1024 * 1024)
+		fmt.Printf("Free disk space is too low: %d Mb left\n", diskFreeMB)
 	}
 
-	netFree := netTotal - netUsed
-	netFreeMbit := netFree * 8 / 1_000_000
-	if netUsed/netTotal*100 > 90 {
-		fmt.Printf("Network bandwidth usage high: %.0f Mbit/s available\n", netFreeMbit)
+	if netUsed*100/netTotal > 90 {
+		netFreeMbit := (netTotal - netUsed) * 8 / (1024 * 1024)
+		fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", netFreeMbit)
 	}
 }
