@@ -92,7 +92,11 @@ func process(v []float64) {
 	}
 
 	if netUsed*100/netTotal > 90 {
-		netFreeMbit := (netTotal - netUsed) * 8 / (1024 * 1024)
-		fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", netFreeMbit)
+		// ❗ ВАЖНО: 1_000_000, а не 1024*1024
+		netFreeMbit := (netTotal - netUsed) * 8 / 1_000_000
+		fmt.Printf(
+			"Network bandwidth usage high: %d Mbit/s available\n",
+			netFreeMbit,
+		)
 	}
 }
